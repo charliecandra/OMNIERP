@@ -1,4 +1,6 @@
 """FastAPI entrypoint for the Multi-Store E-commerce ERP."""
+import csv
+import io
 import json
 import logging
 import os
@@ -204,6 +206,73 @@ def list_orders(
             order_date=order.order_date,
         ))
     return result
+
+
+@api.get("/orders/export.csv")
+def export_orders_csv(
+    platform: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    q = db.query(Order, Store).join(Store, Store.id == Order.store_id)
+    if platform:
+        q = q.filter(Store.platform_name == platform)
+    if status:
+        q = q.filter(Order.status == status)
+    rows = q.order_by(Order.order_date.desc()).all()
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "order_id", "marketplace_order_id", "platform", "store", "status",
+        "revenue", "cogs", "profit", "order_date_utc",
+        "buyer_name", "buyer_address", "tracking_number",
+    ])
+    for order, store in rows:
+        w.writerow([
+            order.id, order.marketplace_order_id, store.platform_name, store.store_name,
+            order.status, f"{order.total_revenue:.2f}", f"{order.total_cogs:.2f}",
+            f"{(order.total_revenue - order.total_cogs):.2f}",
+            order.order_date.isoformat() if order.order_date else "",
+            order.buyer_name or "", (order.buyer_address or "").replace("\n", " "),
+            order.tracking_number or "",
+        ])
+    filename = f"orders_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@api.get("/inventory/export.csv")
+def export_inventory_csv(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    skus = db.query(MasterSKU).order_by(MasterSKU.master_sku_code).all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "sku_id", "master_sku_code", "product_name", "real_stock",
+        "reorder_threshold", "average_base_cost", "inventory_value", "status",
+    ])
+    for s in skus:
+        if s.real_stock < 0:
+            state = "oversold"
+        elif s.real_stock <= s.reorder_threshold:
+            state = "reorder"
+        else:
+            state = "healthy"
+        w.writerow([
+            s.id, s.master_sku_code, s.product_name, s.real_stock,
+            s.reorder_threshold, f"{s.average_base_cost:.4f}",
+            f"{(s.real_stock * s.average_base_cost):.2f}", state,
+        ])
+    filename = f"inventory_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @api.get("/orders/{order_id}", response_model=OrderDetail)

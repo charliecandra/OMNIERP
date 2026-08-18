@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Package, X, Check, PencilSimple } from "@phosphor-icons/react";
-import api from "../lib/api";
+import { Plus, Package, X, Check, PencilSimple, DownloadSimple } from "@phosphor-icons/react";
+import api, { API_BASE } from "../lib/api";
 
 const fmt = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n || 0);
 const int = (n) => new Intl.NumberFormat("en-US").format(n || 0);
@@ -177,10 +177,31 @@ export default function Inventory() {
           <div className="text-xs font-mono uppercase tracking-[0.3em] text-zinc-500">WAREHOUSE</div>
           <h1 className="font-heading text-3xl tracking-tight font-bold mt-1">Inventory</h1>
         </div>
-        <button data-testid="open-inbound-modal" onClick={() => setModal(true)}
-          className="flex items-center gap-2 bg-[#007AFF] hover:bg-[#0056B3] text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors">
-          <Plus size={16} weight="bold" /> Add Inbound Stock
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            data-testid="export-csv-btn"
+            onClick={async () => {
+              const token = localStorage.getItem("erp_token");
+              const res = await fetch(`${API_BASE}/inventory/export.csv`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return toast.error("Export failed");
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `inventory_${Date.now()}.csv`;
+              document.body.appendChild(a); a.click(); a.remove();
+              URL.revokeObjectURL(url);
+              toast.success("Inventory CSV downloaded");
+            }}
+            className="flex items-center gap-2 border border-white/10 hover:bg-white/5 text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors">
+            <DownloadSimple size={16} weight="bold" /> Export CSV
+          </button>
+          <button data-testid="open-inbound-modal" onClick={() => setModal(true)}
+            className="flex items-center gap-2 bg-[#007AFF] hover:bg-[#0056B3] text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors">
+            <Plus size={16} weight="bold" /> Add Inbound Stock
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 border-b border-white/10">

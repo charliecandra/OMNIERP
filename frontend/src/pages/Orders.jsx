@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Printer, FunnelSimple } from "@phosphor-icons/react";
+import { Printer, FunnelSimple, DownloadSimple } from "@phosphor-icons/react";
 import api, { API_BASE } from "../lib/api";
 import OrderDrawer from "../components/OrderDrawer";
 
@@ -91,16 +91,42 @@ export default function Orders() {
           <div className="text-xs font-mono uppercase tracking-[0.3em] text-zinc-500">OPERATIONS</div>
           <h1 className="font-heading text-3xl tracking-tight font-bold mt-1">Order Hub</h1>
         </div>
-        <button
-          data-testid="batch-print-btn"
-          onClick={printLabels}
-          disabled={printing}
-          className="flex items-center gap-2 bg-[#007AFF] hover:bg-[#0056B3] text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors disabled:opacity-60"
-        >
-          <Printer size={16} weight="bold" />
-          {printing ? "Generating…" : "Batch Print Thermal Labels"}
-          {selected.size > 0 && <span className="font-mono bg-white/20 px-1.5 py-0.5 rounded-sm">{selected.size}</span>}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            data-testid="export-csv-btn"
+            onClick={async () => {
+              const token = localStorage.getItem("erp_token");
+              const params = new URLSearchParams();
+              if (platform) params.append("platform", platform);
+              if (status) params.append("status", status);
+              const res = await fetch(`${API_BASE}/orders/export.csv?${params}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return toast.error("Export failed");
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `orders_${Date.now()}.csv`;
+              document.body.appendChild(a); a.click(); a.remove();
+              URL.revokeObjectURL(url);
+              toast.success("Orders CSV downloaded");
+            }}
+            className="flex items-center gap-2 border border-white/10 hover:bg-white/5 text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors"
+          >
+            <DownloadSimple size={16} weight="bold" />
+            Export CSV
+          </button>
+          <button
+            data-testid="batch-print-btn"
+            onClick={printLabels}
+            disabled={printing}
+            className="flex items-center gap-2 bg-[#007AFF] hover:bg-[#0056B3] text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors disabled:opacity-60"
+          >
+            <Printer size={16} weight="bold" />
+            {printing ? "Generating…" : "Batch Print Thermal Labels"}
+            {selected.size > 0 && <span className="font-mono bg-white/20 px-1.5 py-0.5 rounded-sm">{selected.size}</span>}
+          </button>
+        </div>
       </header>
 
       <div className="px-8 py-4 border-b border-white/10 flex items-center gap-4 flex-wrap">
