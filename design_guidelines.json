@@ -1,0 +1,124 @@
+{
+  "theme": "dark",
+  "typography": {
+    "headings": {
+      "fontFamily": "Chivo, sans-serif",
+      "weights": ["400", "700", "900"],
+      "usage": "Use tight letter spacing (tracking-tight) for all headings. Never use Inter for headings. Use font-black for maximum impact on primary metrics."
+    },
+    "body": {
+      "fontFamily": "Satoshi, sans-serif",
+      "weights": ["400", "500", "700"],
+      "usage": "Use for standard UI text, paragraphs, and descriptions."
+    },
+    "mono": {
+      "fontFamily": "JetBrains Mono, monospace",
+      "weights": ["400", "600"],
+      "usage": "CRITICAL: Use for all SKUs, Order IDs, Financial Data (GMV, Profit), Inventory Counts, and uppercase labels."
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tighter font-black",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-bold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-bold",
+      "h4": "text-lg sm:text-xl tracking-tight font-bold",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "labels": "text-xs tracking-[0.2em] uppercase font-mono text-zinc-500"
+    }
+  },
+  "colors": {
+    "archetype": "ARCHETYPE 2: THE PERFORMANCE PRO (Tactical Dark Mode)",
+    "background": "#0A0A0A",
+    "surface": "#0A0A0A",
+    "surfaceHover": "#18181B",
+    "border": "rgba(255, 255, 255, 0.1)",
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "muted": "#52525B"
+    },
+    "brand": {
+      "primary": "#007AFF",
+      "primaryHover": "#0056B3",
+      "alert": "#FF3B30",
+      "success": "#34C759",
+      "warning": "#FFCC00"
+    },
+    "platforms": {
+      "shopee": {
+        "text": "#FF5722",
+        "bg": "rgba(255, 87, 34, 0.1)",
+        "border": "rgba(255, 87, 34, 0.2)"
+      },
+      "tiktok": {
+        "text": "#00F2FE",
+        "bg": "rgba(0, 242, 254, 0.1)",
+        "border": "rgba(0, 242, 254, 0.2)"
+      }
+    }
+  },
+  "layouts": {
+    "strategy": "High Density Grid (MODE B) - The Technical Look",
+    "spacing": "Tight gaps (gap-4 or gap-6) between widgets. Use generous p-6 or p-8 for internal card padding. Maintain high density without feeling cramped.",
+    "sidebar": "Collapsible left sidebar for module navigation (Dashboard, Orders, Inventory, Stores).",
+    "dashboard": "F-pattern layout. Top row: 3-4 headline KPIs (GMV, Total Orders, Net Profit). Middle: Store performance comparison chart (col-span-full or col-span-2).",
+    "surfaces": "GRID BORDERS strategy. Expose the skeleton. Container uses border-collapse style layout. Items use border-r border-b border-white/10. No floating cards."
+  },
+  "visual_enhancers": {
+    "borders": "1px solid borders (border-white/10). No soft shadows. Use sharp edges (rounded-none or max 4px rounded-sm). Tactical minimalism.",
+    "interactions": "Hover states must explicitly set text color and lighten surface (e.g., hover:bg-white/5). Focus states must use Volt Blue ring.",
+    "motion": "Minimal. Use micro-interactions for feedback. Smooth state changes (transition-colors duration-200). NO universal transitions."
+  },
+  "components": {
+    "buttons": "Sharp corners (rounded-sm). High saturation accent blocks. Volt Blue (bg-[#007AFF] text-white) for primary CTA (Batch Print). border border-white/10 text-white hover:bg-white/5 for secondary.",
+    "cards": "Cardless look or flat rectangular. border border-white/10. NO drop shadows. Use inner glow (shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]) for subtle depth.",
+    "tables": "High density. JetBrains Mono for data cells. Explicit hover states for rows. Left-aligned text, right-aligned numbers. Sticky headers with backdrop-blur-md bg-[#0A0A0A]/80.",
+    "inputs": "Flat. bg-transparent border border-white/20 focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] text-white.",
+    "badges": "Square or slight rounding (rounded-sm). 1px border. Used for Order Status and Platform tags.",
+    "modals": "Solid background (#0A0A0A) with 1px border-white/10. Dimmer overlay (bg-black/80 backdrop-blur-sm). Never use muddy transparent backgrounds."
+  },
+  "icons_and_assets": {
+    "icon_library": "@phosphor-icons/react",
+    "icon_usage": "Weight 'regular' or 'duotone'. Use for sidebar navigation, metric icons, and action buttons. Keep consistent sizing.",
+    "images": {
+      "avatar": {
+        "url": "https://images.pexels.com/photos/37148308/pexels-photo-37148308.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Admin user profile headshot"
+      },
+      "products": [
+        "https://images.pexels.com/photos/7814941/pexels-photo-7814941.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "https://images.pexels.com/photos/8049849/pexels-photo-8049849.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+      ]
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure minimum 4.5:1 contrast. Primary text must be pure white or very light gray.",
+    "focus": "focus:ring-2 focus:ring-[#007AFF] focus:outline-none focus:ring-offset-2 focus:ring-offset-[#0A0A0A]",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute (e.g., data-testid='login-submit-button')."
+  },
+  "charts": {
+    "library": "recharts",
+    "styling": "Dark mode optimized. Grid lines should be stroke-white/5. Tooltips must match the dark UI surface with border-white/10 and Solid Background. No default white tooltips."
+  },
+  "instructions_to_main_agent": [
+    "Run 'yarn add @phosphor-icons/react recharts sonner' for dependencies.",
+    "Follow the 'Tactical Dark Mode' aesthetic strictly. The app background must be #0A0A0A.",
+    "Do not use generic Inter font for headings. Setup 'Chivo' for headings, 'Satoshi' for body, and 'JetBrains Mono' for numerical data.",
+    "Ensure all tables (Order Hub, Inventory) are dense and use mono-spaced fonts for IDs, SKUs, and prices.",
+    "For the Store comparison chart, use recharts and style it minimally without heavy fills. Use crisp lines.",
+    "Modal for 'Add Inbound Stock' should use a solid dark surface with 1px border. Calculate final base cost dynamically.",
+    "Implement a collapsible sidebar navigation.",
+    "Add data-testid to all buttons, links, and forms.",
+    "Never use fully transparent backgrounds on dropdowns or sticky headers."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "You MUST NOT apply universal transition (transition: all). Target specific properties instead.",
+    "You MUST NOT center align the app container (.App { text-align: center; }).",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡.",
+    "Use 2-3x more spacing than feels comfortable for layout, but keep tables high-density.",
+    "Subtle grain textures and noise overlays can be used to break flat digital feel.",
+    "Use 'sonner' for toasts.",
+    "Prioritize using pre-existing components from src/components/ui. Override Shadcn default Vercel-look with our brutalist overrides.",
+    "Main agent relies on these image URLs. Missing categories = main agent will use placeholder text which is FORBIDDEN."
+  ]
+}

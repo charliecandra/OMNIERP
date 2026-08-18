@@ -1,0 +1,36 @@
+{
+  "summary": "Backend + frontend smoke tests for Multi-Store E-commerce ERP. All 13 review-request items pass. Login (admin/admin), JWT-protected /api/me, dashboard metrics, stores(4), inventory(8), orders(61+), platform/status filters, inbound stock (final_cogs=6.0, weighted avg 4.4452 -> 4.6316 verified), and webhook (valid deducts stock; invalid mp_sku returns 400) all work. Frontend flows: login/logout, redirects, KPIs+chart, order filters, batch print toast, inbound modal with live final-cogs=$6.00 all work.",
+  "tested_scope": ["frontend", "backend", "auth", "integration"],
+  "passed": [
+    "POST /api/login admin/admin returns access_token + username",
+    "POST /api/login wrong password returns 401",
+    "GET /api/me with Bearer returns {id, username}; without auth returns 401",
+    "GET /api/dashboard/metrics returns total_gmv, total_orders, total_cogs, net_profit and per_store list of 4 stores with numeric fields",
+    "GET /api/stores returns 4 stores (2 shopee + 2 tiktok)",
+    "GET /api/inventory returns 8 SKUs with master_sku_code, real_stock, average_base_cost",
+    "GET /api/orders returns 61 orders with store_name + platform_name populated",
+    "GET /api/orders?platform=shopee returns only shopee (33 rows)",
+    "GET /api/orders?status=pending returns only pending (9 rows)",
+    "POST /api/inventory/inbound {master_sku_id:1, qty:50, base:4, ship:100} => final_cogs=6.0; real_stock +50 (367->417); weighted-avg cost updated 4.4452->4.6316 (matches formula)",
+    "POST /api/webhooks/orders valid mapping => {ok:true, order_id}; deducts master SKU real_stock (417->415 for qty 2)",
+    "POST /api/webhooks/orders invalid marketplace_sku_code => HTTP 400",
+    "Frontend /login: submitting admin/wrong shows sonner error toast and stays on /login",
+    "Frontend /login: admin/admin lands on /dashboard",
+    "Dashboard: kpi-gmv/orders/profit/cogs + dashboard-chart render; 4 per-store rows render (data-testid=store-row-1..4)",
+    "Orders: 62 order-row-* rows render; filter-platform=shopee -> 34 rows all shopee; select-all checks 35 boxes; batch-print-btn shows sonner toast 'Queued 34 thermal labels for print'",
+    "Inventory: 8 sku-row-* rows; open-inbound-modal opens modal; qty=50/base=4/ship=100 -> final-cogs shows $6.00; submit closes modal and shows 'Inbound stock recorded'",
+    "Sidebar toggle collapses/expands; logout-btn clears session and redirects to /login; visiting /dashboard unauthenticated redirects to /login"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": [
+    "filter-platform, filter-status and inbound-sku are native <select> elements (not shadcn Select). Tests must use page.select_option, not role=option clicks — not a product bug.",
+    "Dashboard per-store cards use data-testid pattern 'store-row-{id}' (not 'per-store-*' as hinted in the request). All 4 render correctly.",
+    "Recharts prints harmless width(-1)/height(-1) console warnings before layout settles; chart still renders.",
+    "Orders count is 62 (>=60) — includes prior smoke-test orders, treated as pass per agent-to-agent note.",
+    "Marketplace integrations are MOCKED (Shopee/TikTok) and Batch Print is MOCKED (sonner toast only, no printer)."
+  ]
+}

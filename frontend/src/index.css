@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Chivo:wght@400;700;900&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 4%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 4%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 6% 10%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 4% 10%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 6% 10%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 4 100% 59%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 100% / 0.1;
+    --input: 0 0% 100% / 0.15;
+    --ring: 211 100% 50%;
+    --radius: 0.125rem;
+}
+
+html, body, #root {
+    background: #0A0A0A;
+    color: #FFFFFF;
+    min-height: 100vh;
+}
+
+body {
+    margin: 0;
+    font-family: 'Satoshi', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: #0A0A0A;
+}
+
+.font-heading { font-family: 'Chivo', sans-serif; letter-spacing: -0.02em; }
+.font-mono, code, .mono { font-family: 'JetBrains Mono', monospace; }
+
+/* Subtle grain overlay for tactical feel */
+.grain::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.5'/></svg>");
+    opacity: 0.04;
+    z-index: 1;
+    mix-blend-mode: overlay;
+}
+
+/* Table hover fine control */
+.tbl-row { transition: background-color 200ms ease; }
+.tbl-row:hover { background-color: rgba(255,255,255,0.04); }
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0A0A0A; }
+::-webkit-scrollbar-thumb { background: #27272A; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: #3F3F46; }
+
+::selection { background: #007AFF; color: #FFFFFF; }
+
+@layer base {
+    * { @apply border-white/10; }
+}
