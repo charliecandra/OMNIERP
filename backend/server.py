@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -348,6 +349,7 @@ def webhook_orders(payload: OrderWebhookPayload, db: Session = Depends(get_db)):
         })
 
     now = datetime.now(timezone.utc)
+    tracking = None if payload.status == "cancelled" else f"TRK{random.randint(10**11, 10**12 - 1)}"
     order = Order(
         store_id=payload.store_id,
         marketplace_order_id=payload.marketplace_order_id,
@@ -358,6 +360,7 @@ def webhook_orders(payload: OrderWebhookPayload, db: Session = Depends(get_db)):
         items_json=json.dumps(items_out),
         buyer_name=payload.buyer_name,
         buyer_address=payload.buyer_address,
+        tracking_number=tracking,
         timeline_json=json.dumps([{"at": now.isoformat(), "status": payload.status, "note": "created via webhook"}]),
     )
     db.add(order)

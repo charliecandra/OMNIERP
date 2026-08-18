@@ -64,8 +64,8 @@ async def _pull_orders_for_store(store: Store) -> tuple[bool, str]:
         return False, f"network: {exc.__class__.__name__}"
 
 
-def _sync_cycle_sync() -> None:
-    """One pass over all active, sync-enabled stores (synchronous wrapper)."""
+async def _sync_cycle() -> None:
+    """One pass over all active, sync-enabled stores."""
     db: Session = SessionLocal()
     try:
         stores = (
@@ -78,7 +78,7 @@ def _sync_cycle_sync() -> None:
                 store.last_sync_status = "missing credentials"
                 store.last_sync_at = datetime.now(timezone.utc)
                 continue
-            ok, msg = asyncio.run(_pull_orders_for_store(store))
+            ok, msg = await _pull_orders_for_store(store)
             store.last_sync_at = datetime.now(timezone.utc)
             store.last_sync_status = msg if ok else f"error: {msg}"
         db.commit()
@@ -90,7 +90,7 @@ async def sync_loop() -> None:
     logger.info("Shopee sync worker started (interval=%ss)", SYNC_INTERVAL_SECONDS)
     while True:
         try:
-            _sync_cycle_sync()
+            await _sync_cycle()
         except Exception as exc:  # pragma: no cover
             logger.exception("sync cycle failed: %s", exc)
         await asyncio.sleep(SYNC_INTERVAL_SECONDS)

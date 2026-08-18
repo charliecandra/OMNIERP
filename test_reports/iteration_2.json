@@ -1,0 +1,19 @@
+{
+  "summary": "Iteration 2 additive testing: 13/13 backend tests pass (Order detail w/ items+timeline, Labels PDF w/ %PDF- magic bytes + auth/empty/unknown branches, threshold PATCH + 422 + 404, store PATCH partner creds + write-only partner_key, GET/PUT settings incl. clear-to-null, webhook does not 500 and returns low_stock_alerts_sent). Shopee sync worker startup log confirmed. Frontend: drawer opens from row click (checkbox click does NOT open), tracking/items/timeline populated (screenshot verified); batch print produces real PDF Blob download; 0-selected triggers error toast; inventory threshold-{id} inline editor persists + row reflects new value; Stores slack-card ACTIVE/OFF pill toggles on save; store edit modal saves partner_id/partner_key/shop_id+sync toggle and card shows Auto-Sync ON. Iteration 1 regressions still pass (login/logout, /dashboard unauth -> /login). Post-test state reset: store 1 sync_enabled=false, sku 1 threshold=80, slack webhook cleared.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Order.tracking_number is not populated in POST /api/webhooks/orders (schema OrderWebhookPayload lacks tracking_number and the code does not set order.tracking_number). Legacy orders were backfilled by seed, so drawer works today, but any brand-new order created via webhook will show a null tracking number and the PDF label will print 'TRK-PENDING'. Consider adding tracking_number to the webhook payload or generating one.",
+    "shopee_sync._sync_cycle_sync uses asyncio.run() inside an already-running event loop context — if a store is ever sync_enabled=True this will raise RuntimeError('asyncio.run() cannot be called from a running event loop') because sync_loop() awaits it via the outer loop. It works today only because no store has sync_enabled=True. Suggest awaiting _pull_orders_for_store directly from sync_loop and making _sync_cycle async, or run the sync body inside asyncio.to_thread().",
+    "OrderDrawer keeps the aside always mounted in the DOM and only translates it off-screen; consumers using `[data-testid=order-drawer]` to detect open/closed state must instead inspect `translate-x-0` class. Minor testability nit."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None; used seeded orders/SKUs/stores. Test data resets performed post-run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "backend_test.py covers iteration-2 endpoints. To retest low-stock Slack path with a real Slack URL, PUT /api/settings then POST /api/webhooks/orders with a marketplace_sku_code mapped in store 1 that will drop stock at/below threshold. shopee_sync worker uses asyncio.run() inside async loop — do not enable sync on any store during automated tests without addressing the RCA note above."
+}
