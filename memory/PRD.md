@@ -34,14 +34,19 @@ Docker Compose orchestrates `db` + `backend` (uvicorn) + `frontend` (nginx servi
 - Deployment: `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile` + `nginx.conf`, `.env.example`, `README.md`
 - 13/13 backend + frontend flows verified by testing agent
 
+## Iteration 2 (2026-02) — 4 features
+- **Order Detail Drawer** — `GET /api/orders/{id}` returns items + buyer + tracking + timeline; clickable rows in Order Hub open a right-side drawer with sonner toasts, timeline chips per status
+- **Shopee OAuth scaffold + async sync worker** — new columns `partner_id`, `partner_key`, `shop_id`, `sync_enabled`, `last_sync_at`, `last_sync_status` on `stores`. `shopee_sync.py` runs every 5 minutes, HMAC-signs the Shopee call, but skips stores without creds — `PATCH /api/stores/{id}` from the Stores page pastes keys and toggles sync. Real API integration is stubbed (returns 200/error string) until valid Shopee credentials are pasted.
+- **Reorder Alerts (Slack)** — `settings.slack_webhook_url` (single global), per-SKU `reorder_threshold` (default 50, editable inline in the Inventory table). `POST /api/webhooks/orders` now returns `low_stock_alerts_sent` and best-effort POSTs a Slack message on threshold-transition writes.
+- **Label Generator** — real 4×6 PDF via `reportlab`: `POST /api/orders/labels/pdf {order_ids:[]}` → binary PDF download. Frontend Batch Print button triggers download of a multi-page PDF (one label per order).
+
 ## Backlog
 ### P1
-- Order detail drawer (line items, shipping address, tracking)
-- Real Shopee & TikTok Shop OAuth + inbound sync workers
 - CSV/Excel export for orders + inventory
+- Order status editor + inline shipping / tracking update on the drawer
 
 ### P2
 - Multi-user + role-based access (manager / operator / viewer)
-- Reorder-point alerts (email/Slack) when stock < threshold
-- Real thermal-label PDF generator (Zebra ZPL) for batch print
-- Alembic migrations (currently `create_all` on startup)
+- ZPL output alongside PDF for Zebra thermal printers
+- Alembic migrations (currently `create_all` + additive `ALTER TABLE IF NOT EXISTS`)
+- Real Shopee OAuth callback flow + token refresh

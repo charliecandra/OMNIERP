@@ -9,6 +9,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -17,17 +18,22 @@ load_dotenv(ROOT_DIR / ".env")
 
 from auth import create_access_token, get_current_user, verify_password  # noqa: E402
 from database import SessionLocal, get_db  # noqa: E402
-from models import InboundLog, MasterSKU, Order, SKUMapping, Store, User  # noqa: E402
+from labels import generate_labels_pdf  # noqa: E402
+from models import InboundLog, MasterSKU, Order, SKUMapping, Setting, Store, User  # noqa: E402
+from notifier import send_low_stock_alert  # noqa: E402
 from schemas import (  # noqa: E402
-    DashboardMetrics, InboundLogOut, InboundStockRequest, LoginRequest,
-    MasterSKUOut, OrderOut, OrderWebhookPayload, StoreOut, Token, UserOut,
+    DashboardMetrics, InboundLogOut, InboundStockRequest, LabelBatchRequest,
+    LoginRequest, MasterSKUOut, OrderDetail, OrderOut, OrderTimelineEvent,
+    OrderWebhookPayload, SettingsOut, SettingsUpdate, SKUThresholdUpdate,
+    StoreOut, StoreUpdate, Token, UserOut,
 )
 from seed import run as run_seed  # noqa: E402
+from shopee_sync import start_background as start_shopee_sync  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("erp")
 
-app = FastAPI(title="Multi-Store E-commerce ERP", version="1.0.0")
+app = FastAPI(title="Multi-Store E-commerce ERP", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,6 +53,9 @@ def _startup() -> None:
         logger.info("Database initialised and seeded.")
     except Exception as exc:  # pragma: no cover
         logger.exception("Seed failed: %s", exc)
+
+
+start_shopee_sync(app)
 
 
 # --------------------------------------------------------------------------- #
@@ -76,6 +85,52 @@ def me(current: User = Depends(get_current_user)):
 @api.get("/stores", response_model=list[StoreOut])
 def list_stores(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return db.query(Store).order_by(Store.id).all()
+
+
+@api.patch("/stores/{store_id}", response_model=StoreOut)
+def update_store(
+    store_id: int,
+    payload: StoreUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(store, field, value)
+    db.commit()
+    db.refresh(store)
+    return store
+
+
+# --------------------------------------------------------------------------- #
+# Settings (Slack webhook)
+# --------------------------------------------------------------------------- #
+def _get_settings_row(db: Session) -> Setting:
+    row = db.query(Setting).filter(Setting.id == 1).first()
+    if not row:
+        row = Setting(id=1)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+@api.get("/settings", response_model=SettingsOut)
+def get_settings(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    row = _get_settings_row(db)
+    return SettingsOut(slack_webhook_url=row.slack_webhook_url)
+
+
+@api.put("/settings", response_model=SettingsOut)
+def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    row = _get_settings_row(db)
+    if payload.slack_webhook_url is not None:
+        row.slack_webhook_url = payload.slack_webhook_url or None
+    db.commit()
+    db.refresh(row)
+    return SettingsOut(slack_webhook_url=row.slack_webhook_url)
 
 
 # --------------------------------------------------------------------------- #
@@ -142,17 +197,63 @@ def list_orders(
     result = []
     for order, store in q.all():
         result.append(OrderOut(
-            id=order.id,
-            store_id=order.store_id,
-            store_name=store.store_name,
-            platform_name=store.platform_name,
-            marketplace_order_id=order.marketplace_order_id,
-            status=order.status,
-            total_revenue=order.total_revenue,
-            total_cogs=order.total_cogs,
+            id=order.id, store_id=order.store_id, store_name=store.store_name,
+            platform_name=store.platform_name, marketplace_order_id=order.marketplace_order_id,
+            status=order.status, total_revenue=order.total_revenue, total_cogs=order.total_cogs,
             order_date=order.order_date,
         ))
     return result
+
+
+@api.get("/orders/{order_id}", response_model=OrderDetail)
+def get_order(order_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    row = db.query(Order, Store).join(Store, Store.id == Order.store_id).filter(Order.id == order_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order, store = row
+    try:
+        items = json.loads(order.items_json or "[]")
+    except Exception:
+        items = []
+    timeline_raw = []
+    try:
+        timeline_raw = json.loads(order.timeline_json or "[]")
+    except Exception:
+        pass
+    timeline = [OrderTimelineEvent(**e) for e in timeline_raw]
+    return OrderDetail(
+        id=order.id, store_id=order.store_id, store_name=store.store_name,
+        platform_name=store.platform_name, marketplace_order_id=order.marketplace_order_id,
+        status=order.status, total_revenue=order.total_revenue, total_cogs=order.total_cogs,
+        order_date=order.order_date, buyer_name=order.buyer_name, buyer_address=order.buyer_address,
+        tracking_number=order.tracking_number, items=items, timeline=timeline,
+    )
+
+
+@api.post("/orders/labels/pdf")
+def batch_labels_pdf(
+    payload: LabelBatchRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    if not payload.order_ids:
+        raise HTTPException(status_code=400, detail="No order ids provided")
+    rows = (
+        db.query(Order, Store)
+        .join(Store, Store.id == Order.store_id)
+        .filter(Order.id.in_(payload.order_ids))
+        .order_by(Order.id)
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="No matching orders")
+    pdf = generate_labels_pdf(rows)
+    filename = f"labels_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -161,6 +262,20 @@ def list_orders(
 @api.get("/inventory", response_model=list[MasterSKUOut])
 def list_inventory(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return db.query(MasterSKU).order_by(MasterSKU.master_sku_code).all()
+
+
+@api.patch("/inventory/{sku_id}/threshold", response_model=MasterSKUOut)
+def update_threshold(
+    sku_id: int, payload: SKUThresholdUpdate,
+    db: Session = Depends(get_db), _: User = Depends(get_current_user),
+):
+    sku = db.query(MasterSKU).filter(MasterSKU.id == sku_id).first()
+    if not sku:
+        raise HTTPException(status_code=404, detail="SKU not found")
+    sku.reorder_threshold = payload.reorder_threshold
+    db.commit()
+    db.refresh(sku)
+    return sku
 
 
 @api.post("/inventory/inbound", response_model=InboundLogOut)
@@ -173,10 +288,7 @@ def add_inbound(
     if not sku:
         raise HTTPException(status_code=404, detail="Master SKU not found")
 
-    # Final base cost = base_cost + (shipping / quantity)
     final_cogs = round(payload.base_cost + (payload.shipping_cost / payload.quantity), 4)
-
-    # Weighted average update of average_base_cost
     old_qty = sku.real_stock
     old_avg = sku.average_base_cost
     new_qty = old_qty + payload.quantity
@@ -186,11 +298,8 @@ def add_inbound(
     sku.average_base_cost = round(new_avg, 4)
 
     log = InboundLog(
-        master_sku_id=sku.id,
-        quantity=payload.quantity,
-        base_cost=payload.base_cost,
-        shipping_cost=payload.shipping_cost,
-        final_cogs=final_cogs,
+        master_sku_id=sku.id, quantity=payload.quantity, base_cost=payload.base_cost,
+        shipping_cost=payload.shipping_cost, final_cogs=final_cogs,
     )
     db.add(log)
     db.commit()
@@ -199,7 +308,7 @@ def add_inbound(
 
 
 # --------------------------------------------------------------------------- #
-# Order webhook — deducts real_stock in Master_SKU
+# Order webhook — deducts stock + Slack alert on low stock
 # --------------------------------------------------------------------------- #
 @api.post("/webhooks/orders")
 def webhook_orders(payload: OrderWebhookPayload, db: Session = Depends(get_db)):
@@ -210,6 +319,7 @@ def webhook_orders(payload: OrderWebhookPayload, db: Session = Depends(get_db)):
     total_revenue = 0.0
     total_cogs = 0.0
     items_out = []
+    affected_skus: list[MasterSKU] = []
 
     for item in payload.items:
         mapping = (
@@ -223,31 +333,49 @@ def webhook_orders(payload: OrderWebhookPayload, db: Session = Depends(get_db)):
         if not mapping:
             raise HTTPException(status_code=400, detail=f"No mapping for marketplace SKU {item.marketplace_sku_code}")
         sku = mapping.master_sku
-        # Deduct real stock (can go negative to flag oversell — visible in inventory)
-        sku.real_stock = sku.real_stock - item.quantity
-        line_revenue = item.unit_price * item.quantity
-        line_cogs = sku.average_base_cost * item.quantity
-        total_revenue += line_revenue
-        total_cogs += line_cogs
+        prev = sku.real_stock
+        sku.real_stock = prev - item.quantity
+        # Alert if crossed threshold on this write
+        if prev > sku.reorder_threshold and sku.real_stock <= sku.reorder_threshold:
+            affected_skus.append(sku)
+        total_revenue += item.unit_price * item.quantity
+        total_cogs += sku.average_base_cost * item.quantity
         items_out.append({
             "master_sku_code": sku.master_sku_code,
+            "product_name": sku.product_name,
             "quantity": item.quantity,
             "unit_price": item.unit_price,
         })
 
+    now = datetime.now(timezone.utc)
     order = Order(
         store_id=payload.store_id,
         marketplace_order_id=payload.marketplace_order_id,
         status=payload.status,
         total_revenue=round(total_revenue, 2),
         total_cogs=round(total_cogs, 2),
-        order_date=datetime.now(timezone.utc),
+        order_date=now,
         items_json=json.dumps(items_out),
+        buyer_name=payload.buyer_name,
+        buyer_address=payload.buyer_address,
+        timeline_json=json.dumps([{"at": now.isoformat(), "status": payload.status, "note": "created via webhook"}]),
     )
     db.add(order)
     db.commit()
     db.refresh(order)
-    return {"ok": True, "order_id": order.id, "marketplace_order_id": order.marketplace_order_id}
+
+    # Fire alerts (best-effort)
+    alerts_sent = 0
+    for sku in affected_skus:
+        if send_low_stock_alert(db, sku):
+            alerts_sent += 1
+
+    return {
+        "ok": True,
+        "order_id": order.id,
+        "marketplace_order_id": order.marketplace_order_id,
+        "low_stock_alerts_sent": alerts_sent,
+    }
 
 
 app.include_router(api)

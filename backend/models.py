@@ -27,6 +27,13 @@ class Store(Base):
     api_key = Column(String(255), nullable=True)
     api_secret = Column(String(255), nullable=True)
     access_token = Column(String(255), nullable=True)
+    # Shopee OAuth
+    partner_id = Column(String(64), nullable=True)
+    partner_key = Column(String(255), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    sync_enabled = Column(Boolean, default=False, nullable=False)
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_sync_status = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
@@ -41,6 +48,7 @@ class MasterSKU(Base):
     product_name = Column(String(255), nullable=False)
     real_stock = Column(Integer, default=0, nullable=False)
     average_base_cost = Column(Float, default=0.0, nullable=False)
+    reorder_threshold = Column(Integer, default=50, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
     mappings = relationship("SKUMapping", back_populates="master_sku", cascade="all, delete-orphan")
@@ -67,7 +75,11 @@ class Order(Base):
     total_revenue = Column(Float, default=0.0, nullable=False)
     total_cogs = Column(Float, default=0.0, nullable=False)
     order_date = Column(DateTime(timezone=True), default=_utcnow)
-    items_json = Column(Text, nullable=True)  # JSON string of line items
+    items_json = Column(Text, nullable=True)
+    buyer_name = Column(String(128), nullable=True)
+    buyer_address = Column(Text, nullable=True)
+    tracking_number = Column(String(64), nullable=True)
+    timeline_json = Column(Text, nullable=True)
 
     store = relationship("Store", back_populates="orders")
 
@@ -83,3 +95,10 @@ class InboundLog(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
     master_sku = relationship("MasterSKU", back_populates="inbound_logs")
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+    id = Column(Integer, primary_key=True, default=1)
+    slack_webhook_url = Column(String(500), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

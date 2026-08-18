@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Printer, FunnelSimple } from "@phosphor-icons/react";
-import api from "../lib/api";
+import api, { API_BASE } from "../lib/api";
+import OrderDrawer from "../components/OrderDrawer";
 
 const PLATFORM_COLORS = {
   shopee: { bg: "rgba(255,87,34,0.1)", border: "rgba(255,87,34,0.3)", text: "#FF5722" },
@@ -24,6 +25,8 @@ export default function Orders() {
   const [status, setStatus] = useState("");
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  const [drawerId, setDrawerId] = useState(null);
+  const [printing, setPrinting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -53,11 +56,32 @@ export default function Orders() {
     return { count: orders.length, gmv };
   }, [orders]);
 
-  const printLabels = () => {
+  const printLabels = async () => {
     if (!selected.size) return toast.error("Select at least one order");
-    toast.success(`Queued ${selected.size} thermal labels for print`, {
-      description: "Batch dispatched to /dev/thermal-printer (mock)",
-    });
+    setPrinting(true);
+    try {
+      const token = localStorage.getItem("erp_token");
+      const res = await fetch(`${API_BASE}/orders/labels/pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ order_ids: Array.from(selected) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `labels_${Date.now()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Generated ${selected.size} thermal labels (4×6 PDF)`);
+    } catch (e) {
+      toast.error("Failed to generate labels");
+    } finally {
+      setPrinting(false);
+    }
   };
 
   return (
@@ -70,15 +94,15 @@ export default function Orders() {
         <button
           data-testid="batch-print-btn"
           onClick={printLabels}
-          className="flex items-center gap-2 bg-[#007AFF] hover:bg-[#0056B3] text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors"
+          disabled={printing}
+          className="flex items-center gap-2 bg-[#007AFF] hover:bg-[#0056B3] text-white font-semibold px-4 py-2 rounded-sm text-xs uppercase tracking-wider transition-colors disabled:opacity-60"
         >
           <Printer size={16} weight="bold" />
-          Batch Print Thermal Labels
+          {printing ? "Generating…" : "Batch Print Thermal Labels"}
           {selected.size > 0 && <span className="font-mono bg-white/20 px-1.5 py-0.5 rounded-sm">{selected.size}</span>}
         </button>
       </header>
 
-      {/* Filters */}
       <div className="px-8 py-4 border-b border-white/10 flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2 text-zinc-500">
           <FunnelSimple size={16} />
@@ -116,7 +140,6 @@ export default function Orders() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm" data-testid="orders-table">
           <thead className="sticky top-0 backdrop-blur-md bg-[#0A0A0A]/80 border-b border-white/10">
@@ -148,8 +171,13 @@ export default function Orders() {
               const p = PLATFORM_COLORS[o.platform_name] || PLATFORM_COLORS.shopee;
               const profit = o.total_revenue - o.total_cogs;
               return (
-                <tr key={o.id} className="tbl-row border-b border-white/5" data-testid={`order-row-${o.id}`}>
-                  <td className="p-4">
+                <tr
+                  key={o.id}
+                  className="tbl-row border-b border-white/5 cursor-pointer"
+                  data-testid={`order-row-${o.id}`}
+                  onClick={() => setDrawerId(o.id)}
+                >
+                  <td className="p-4" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox"
                       checked={selected.has(o.id)}
                       onChange={() => toggle(o.id)}
@@ -183,6 +211,8 @@ export default function Orders() {
           </tbody>
         </table>
       </div>
+
+      <OrderDrawer orderId={drawerId} onClose={() => setDrawerId(null)} />
     </div>
   );
 }
