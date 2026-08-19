@@ -30,8 +30,13 @@ class StoreOut(BaseModel):
     sync_enabled: bool = False
     partner_id: Optional[str] = None
     shop_id: Optional[str] = None
+    shop_cipher: Optional[str] = None
     last_sync_at: Optional[datetime] = None
     last_sync_status: Optional[str] = None
+    connection_status: str = "disconnected"
+    last_verified_at: Optional[datetime] = None
+    token_expires_at: Optional[datetime] = None
+    is_authorized: bool = False
 
 
 class StoreUpdate(BaseModel):
@@ -40,6 +45,17 @@ class StoreUpdate(BaseModel):
     shop_id: Optional[str] = None
     sync_enabled: Optional[bool] = None
     is_active: Optional[bool] = None
+
+
+class AuthorizeStartResponse(BaseModel):
+    authorize_url: str
+
+
+class TestConnectionResponse(BaseModel):
+    ok: bool
+    platform: str
+    connection_status: str
+    detail: dict = {}
 
 
 class MasterSKUOut(BaseModel):

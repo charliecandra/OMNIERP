@@ -26,14 +26,20 @@ class Store(Base):
     store_name = Column(String(128), nullable=False)
     api_key = Column(String(255), nullable=True)
     api_secret = Column(String(255), nullable=True)
-    access_token = Column(String(255), nullable=True)
-    # Shopee OAuth
+    access_token = Column(String(2048), nullable=True)
+    refresh_token = Column(String(2048), nullable=True)
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    refresh_token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    # Shopee OAuth  (partner_id/partner_key are provided per-store; app-level fallback in env)
     partner_id = Column(String(64), nullable=True)
     partner_key = Column(String(255), nullable=True)
     shop_id = Column(String(64), nullable=True)
+    shop_cipher = Column(String(255), nullable=True)  # TikTok
     sync_enabled = Column(Boolean, default=False, nullable=False)
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     last_sync_status = Column(String(255), nullable=True)
+    connection_status = Column(String(32), default="disconnected", nullable=False)  # disconnected|active|expired|error
+    last_verified_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 

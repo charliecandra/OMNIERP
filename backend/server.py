@@ -21,17 +21,24 @@ load_dotenv(ROOT_DIR / ".env")
 
 from auth import create_access_token, get_current_user, verify_password  # noqa: E402
 from database import SessionLocal, get_db  # noqa: E402
+from integrations import shopee as shopee_client  # noqa: E402
+from integrations import tiktok as tiktok_client  # noqa: E402
+from jose import JWTError, jwt as _jwt  # noqa: E402
 from labels import generate_labels_pdf  # noqa: E402
 from models import InboundLog, MasterSKU, Order, SKUMapping, Setting, Store, User  # noqa: E402
 from notifier import send_low_stock_alert  # noqa: E402
 from schemas import (  # noqa: E402
-    DashboardMetrics, InboundLogOut, InboundStockRequest, LabelBatchRequest,
-    LoginRequest, MasterSKUOut, OrderDetail, OrderOut, OrderTimelineEvent,
-    OrderWebhookPayload, SettingsOut, SettingsUpdate, SKUThresholdUpdate,
-    StoreOut, StoreUpdate, Token, UserOut,
+    AuthorizeStartResponse, DashboardMetrics, InboundLogOut, InboundStockRequest,
+    LabelBatchRequest, LoginRequest, MasterSKUOut, OrderDetail, OrderOut,
+    OrderTimelineEvent, OrderWebhookPayload, SettingsOut, SettingsUpdate,
+    SKUThresholdUpdate, StoreOut, StoreUpdate, TestConnectionResponse, Token,
+    UserOut,
 )
 from seed import run as run_seed  # noqa: E402
 from shopee_sync import start_background as start_shopee_sync  # noqa: E402
+from fastapi.responses import RedirectResponse  # noqa: E402
+from datetime import timedelta  # noqa: E402
+from urllib.parse import quote  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("erp")
@@ -87,7 +94,8 @@ def me(current: User = Depends(get_current_user)):
 # --------------------------------------------------------------------------- #
 @api.get("/stores", response_model=list[StoreOut])
 def list_stores(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return db.query(Store).order_by(Store.id).all()
+    rows = db.query(Store).order_by(Store.id).all()
+    return [_store_to_out(s) for s in rows]
 
 
 @api.patch("/stores/{store_id}", response_model=StoreOut)
@@ -104,7 +112,239 @@ def update_store(
         setattr(store, field, value)
     db.commit()
     db.refresh(store)
-    return store
+    return _store_to_out(store)
+
+
+def _store_to_out(s: Store) -> StoreOut:
+    seeded_placeholder = s.access_token in {"sh_main_token", "sh_out_token", "tt_flag_token", "tt_live_token"}
+    return StoreOut(
+        id=s.id, platform_name=s.platform_name, store_name=s.store_name,
+        is_active=s.is_active, sync_enabled=s.sync_enabled,
+        partner_id=s.partner_id, shop_id=s.shop_id, shop_cipher=s.shop_cipher,
+        last_sync_at=s.last_sync_at, last_sync_status=s.last_sync_status,
+        connection_status=s.connection_status or "disconnected",
+        last_verified_at=s.last_verified_at, token_expires_at=s.token_expires_at,
+        is_authorized=bool(s.access_token) and not seeded_placeholder,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# OAuth 2.0 — Shopee & TikTok Shop
+# --------------------------------------------------------------------------- #
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ALG = os.environ.get("JWT_ALGORITHM", "HS256")
+
+
+def _oauth_state(store_id: int, platform: str) -> str:
+    exp = datetime.now(timezone.utc) + timedelta(minutes=15)
+    return _jwt.encode({"sid": store_id, "p": platform, "exp": exp}, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def _verify_state(state: str, expected_platform: str) -> int:
+    try:
+        payload = _jwt.decode(state, JWT_SECRET, algorithms=[JWT_ALG])
+    except JWTError:
+        return -1
+    if payload.get("p") != expected_platform:
+        return -2
+    return int(payload["sid"])
+
+
+def _frontend_redirect(status: str, message: str = "") -> RedirectResponse:
+    base = os.environ.get("FRONTEND_STORES_URL", "/stores")
+    return RedirectResponse(f"{base}?connect={status}&msg={quote(message)}", status_code=303)
+
+
+@api.get("/stores/{store_id}/oauth/start", response_model=AuthorizeStartResponse)
+def oauth_start(
+    store_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    state = _oauth_state(store_id, store.platform_name)
+
+    if store.platform_name == "shopee":
+        if not (store.partner_id and store.partner_key):
+            raise HTTPException(status_code=400, detail="Partner ID and Partner Key are required")
+        redirect_base = os.environ.get("SHOPEE_REDIRECT_URI") or f"{os.environ.get('APP_URL','')}/api/oauth/shopee/callback"
+        # Encode our state into the redirect URL so Shopee sends it back
+        redirect_with_state = f"{redirect_base}?state={quote(state)}"
+        url = shopee_client.build_authorize_url(store.partner_id, store.partner_key, redirect_with_state)
+        return AuthorizeStartResponse(authorize_url=url)
+
+    if store.platform_name == "tiktok":
+        if not (store.partner_id and store.partner_key):
+            raise HTTPException(status_code=400, detail="App Key and App Secret are required")
+        url = tiktok_client.build_authorize_url(store.partner_id, state)
+        return AuthorizeStartResponse(authorize_url=url)
+
+    raise HTTPException(status_code=400, detail=f"Unsupported platform: {store.platform_name}")
+
+
+@api.get("/oauth/shopee/callback")
+async def shopee_callback(
+    code: Optional[str] = None,
+    shop_id: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if error:
+        return _frontend_redirect("error", error)
+    if not (code and shop_id and state):
+        return _frontend_redirect("error", "Missing code/shop_id/state")
+
+    store_id = _verify_state(state, "shopee")
+    if store_id < 0:
+        return _frontend_redirect("error", "Invalid or platform-mismatched state")
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        return _frontend_redirect("error", "Store not found")
+
+    try:
+        tokens = await shopee_client.exchange_code(
+            store.partner_id, store.partner_key, code, shop_id
+        )
+    except Exception as exc:
+        store.connection_status = "error"
+        db.commit()
+        return _frontend_redirect("error", str(exc)[:200])
+
+    store.shop_id = str(shop_id)
+    store.access_token = tokens["access_token"]
+    store.refresh_token = tokens["refresh_token"]
+    store.token_expires_at = tokens["token_expires_at"]
+    store.refresh_token_expires_at = tokens["refresh_token_expires_at"]
+    store.connection_status = "active"
+    store.last_verified_at = datetime.now(timezone.utc)
+    db.commit()
+    return _frontend_redirect("success", store.store_name)
+
+
+@api.get("/oauth/tiktok/callback")
+async def tiktok_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if error:
+        return _frontend_redirect("error", error)
+    if not (code and state):
+        return _frontend_redirect("error", "Missing code or state")
+
+    store_id = _verify_state(state, "tiktok")
+    if store_id < 0:
+        return _frontend_redirect("error", "Invalid or platform-mismatched state")
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        return _frontend_redirect("error", "Store not found")
+
+    try:
+        tokens = await tiktok_client.exchange_code(store.partner_id, store.partner_key, code)
+    except Exception as exc:
+        store.connection_status = "error"
+        db.commit()
+        return _frontend_redirect("error", str(exc)[:200])
+
+    if tokens.get("shop_id"):
+        store.shop_id = tokens["shop_id"]
+    if tokens.get("shop_cipher"):
+        store.shop_cipher = tokens["shop_cipher"]
+    store.access_token = tokens["access_token"]
+    store.refresh_token = tokens["refresh_token"]
+    store.token_expires_at = tokens["token_expires_at"]
+    store.refresh_token_expires_at = tokens["refresh_token_expires_at"]
+    store.connection_status = "active"
+    store.last_verified_at = datetime.now(timezone.utc)
+    db.commit()
+    return _frontend_redirect("success", store.store_name)
+
+
+async def _ensure_fresh_token(db: Session, store: Store) -> None:
+    """Refresh 5 minutes early. No-op if no tokens yet."""
+    if not store.access_token or not store.token_expires_at:
+        return
+    now = datetime.now(timezone.utc)
+    if store.token_expires_at > now + timedelta(minutes=5):
+        return
+    if not store.refresh_token:
+        return
+    try:
+        if store.platform_name == "shopee":
+            fresh = await shopee_client.refresh_access_token(
+                store.partner_id, store.partner_key, store.refresh_token, store.shop_id
+            )
+        else:
+            fresh = await tiktok_client.refresh_access_token(
+                store.partner_id, store.partner_key, store.refresh_token
+            )
+        store.access_token = fresh["access_token"]
+        if fresh.get("refresh_token"):
+            store.refresh_token = fresh["refresh_token"]
+        store.token_expires_at = fresh["token_expires_at"]
+        if fresh.get("refresh_token_expires_at"):
+            store.refresh_token_expires_at = fresh["refresh_token_expires_at"]
+        db.commit()
+    except Exception as exc:
+        store.connection_status = "expired"
+        store.last_sync_status = f"refresh failed: {exc}"
+        db.commit()
+
+
+@api.post("/stores/{store_id}/test", response_model=TestConnectionResponse)
+async def test_store_connection(
+    store_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    if not (store.partner_id and store.partner_key):
+        raise HTTPException(status_code=400, detail="Partner credentials are not configured for this store")
+    if not store.access_token:
+        raise HTTPException(status_code=400, detail="Store is not authorized yet — click Connect / Authorize first")
+    if store.platform_name == "shopee" and not store.shop_id:
+        raise HTTPException(status_code=400, detail="Shopee shop_id is missing — complete the OAuth handshake to link a shop")
+
+    await _ensure_fresh_token(db, store)
+
+    try:
+        if store.platform_name == "shopee":
+            data = await shopee_client.get_shop_info(
+                store.partner_id, store.partner_key, store.access_token, store.shop_id
+            )
+        else:
+            data = await tiktok_client.get_authorized_shops(
+                store.partner_id, store.partner_key, store.access_token
+            )
+    except (shopee_client.ShopeeError, tiktok_client.TikTokError) as exc:
+        store.connection_status = "error"
+        db.commit()
+        return TestConnectionResponse(
+            ok=False, platform=store.platform_name, connection_status="error",
+            detail={"error": str(exc)[:300]},
+        )
+    except Exception as exc:
+        logger.exception("Test connection unexpected error")
+        store.connection_status = "error"
+        db.commit()
+        return TestConnectionResponse(
+            ok=False, platform=store.platform_name, connection_status="error",
+            detail={"error": f"Unexpected: {exc.__class__.__name__}"},
+        )
+
+    store.connection_status = "active"
+    store.last_verified_at = datetime.now(timezone.utc)
+    db.commit()
+    return TestConnectionResponse(
+        ok=True, platform=store.platform_name, connection_status="active", detail=data,
+    )
 
 
 # --------------------------------------------------------------------------- #

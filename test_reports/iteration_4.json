@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 4 retest of the 4 fixes from iteration_3. Backend: ALL FIXED — 20/20 new targeted assertions in /app/backend/tests/test_oauth_fixes.py pass, plus 37/37 iteration-1/2/3 regressions (backend_test.py + test_oauth.py) still pass. TikTok host/paths are correct now: exchange_code against https://auth.tiktok-shops.com/api/v2/token/get returns the legitimate marketplace error 'invalid auth code', refresh returns 'can not find related auth record', and POST /stores/3/test (dummy app_key) returns 200 ok=false with detail.error=\"Invalid credentials. Invalid 'app_key' query parameter...\" — no 'Invalid path' and no raw Python text anywhere. POST /stores/{id}/test now 400s with the exact expected messages for missing partner creds / missing access_token / missing shopee shop_id, and genuine marketplace errors come back as clean 200+ok=false with connection_status persisted as 'error'. Invalid / expired / platform-mismatched OAuth state now returns 303 to FRONTEND_STORES_URL?connect=error&msg=... for both shopee and tiktok callbacks. StoreOut.is_authorized present and false for all 4 seeded stores (placeholder tokens filtered), true when a real token is set, and neither access_token nor partner_key leak. Frontend: FIX #1 VERIFIED — with connection_status='error' the Manage Connection modal shows [data-testid=store-modal-test]; clicking it fires the real API, shows the clean 400 toast ('Shopee shop_id is missing — complete the OAuth handshake to link a shop') and the button stays visible afterwards. FIX #2 STILL BROKEN — /stores?connect=success&msg=... and connect=error&msg=... still render NO toast; the setTimeout(0) wrapper is cancelled by the effect's own cleanup. Proven by removing clearTimeout(t) as a temporary diagnostic (toast then rendered 'Connected · Shopee Main SG'); diagnostic reverted. All store rows reset to partner_id/partner_key/shop_id=null, connection_status='disconnected', seeded access_tokens restored.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Post-OAuth callback toast (/stores?connect=success|error&msg=...)",
+        "issue": "STILL FAILING after the setTimeout(0) fix. Stores.jsx lines 257-270: the effect schedules the toast with setTimeout(fn, 0), then synchronously calls setParams(params, {replace:true}) which changes the `params` dependency, so React re-runs the effect and first executes the previous cleanup `return () => clearTimeout(t)` — cancelling the pending toast before the 0ms timer can fire. On the second run `connect` is already gone so it early-returns. Net effect: still zero user feedback after returning from Shopee/TikTok. Verified for both connect=success and connect=error (5s wait each, no [data-sonner-toast]). Confirmed root cause by temporarily removing clearTimeout(t) -> green toast 'Connected · Shopee Main SG' rendered immediately (diagnostic reverted, file back to original). Suggested fix: capture the params ONCE outside the reactive deps (e.g. read window.location.search on mount with an empty dep array + a useRef guard) or drop the cleanup / use a module-level 'alreadyFired' ref instead of clearing the timer.",
+        "affected_selectors": ["[data-sonner-toast]", "[data-testid=stores-page]"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Stores > Manage Connection modal",
+        "issues": ["Status badge reads ERROR while the box below still reads 'AUTHORIZED / Shop ID: —' even though is_authorized=false and shop_id is null — misleading. The green AUTHORIZED block is keyed on the same isAuthorized flag that now includes connection_status==='error'; consider labelling it 'TOKEN PRESENT' or hiding it when store.is_authorized is false.", "Still no field to enter/edit shop_id (carry-over MEDIUM from iteration 3), so a Shopee store that never completed the handshake can never pass Test Connection from the UI."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oauth_fixes.py",
+    "/app/backend/tests/test_oauth.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results_iter4.xml"
+  ],
+  "action_items": [
+    "Fix the post-callback toast for real: the effect cleanup clearTimeout(t) cancels the deferred toast when setParams re-triggers the same effect. Read the connect/msg params once on mount (empty deps) or guard with a useRef flag instead of clearing the timer.",
+    "Optional polish: don't show the green 'AUTHORIZED' block when store.is_authorized === false (currently shown for connection_status='error' with no token/shop_id).",
+    "Optional (carry-over): allow editing shop_id in the Manage Connection modal."
+  ],
+  "critical_code_review_comments": [
+    "Backend fixes are clean: _store_to_out filters the 4 seeded placeholder tokens, _verify_state returns -1/-2 sentinels and both callbacks redirect, and test_store_connection only converts ShopeeError/TikTokError into user-facing payloads while unexpected exceptions are logged and reduced to 'Unexpected: <ClassName>'.",
+    "tiktok.py: single _safe_json parse, pre-signing null guards, and code!=0 treated as error — all previous minor items addressed.",
+    "Test isolation note: /app/backend/tests/* mutate shared Store rows, and pytest.ini enables xdist (-n 2), which causes cross-worker interference (is_authorized test failed only under parallel run). Run the store/OAuth suites with -n 0 or give each suite its own store row.",
+    "Carry-over unfixed from iteration 2: shopee_sync._sync_cycle calls asyncio.run() inside a running loop; do not enable sync_enabled on a store until fixed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_oauth_fixes.py",
+    "/app/backend/tests/_reset_stores.py"
+  ],
+  "success_rate": {"backend": "100% (20/20 targeted fix assertions + 37/37 regressions)", "frontend": "80% (Test Connection visibility fix verified; post-callback toast still broken)"},
+  "seed_data_creation": "No new rows. Temporarily set partner_id/partner_key/shop_id/access_token/connection_status on stores 1 and 3; all reset afterwards (partner_id/partner_key/shop_id=null, connection_status='disconnected', seeded access_tokens sh_main_token/sh_out_token/tt_flag_token/tt_live_token restored).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin / admin",
+  "context_for_next_testing_agent": "Run store-related suites with -n 0 (pytest.ini uses xdist and the tests share DB rows). New file /app/backend/tests/test_oauth_fixes.py covers the iteration-3 fixes; /app/backend/tests/_reset_stores.py restores pristine store state. Only remaining defect: post-callback sonner toast in Stores.jsx (effect cleanup cancels the deferred toast). To retest, log in, navigate to /stores?connect=success&msg=X and poll [data-sonner-toast] within 4s. TikTok auth host auth.tiktok-shops.com IS reachable from this sandbox and returns real errors.",
+  "rca_of_the_issue": "Post-callback toast: useEffect([params, setParams]) schedules toast via setTimeout(...,0) but then calls setParams() in the same synchronous block; the params object identity changes, React tears down the effect (running clearTimeout(t)) before the macrotask fires, so the toast is discarded. Empirically confirmed: deleting clearTimeout(t) makes the toast render, restoring it makes it disappear again."
+}
